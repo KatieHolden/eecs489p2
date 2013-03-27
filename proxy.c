@@ -97,13 +97,13 @@ void* worker(void * ptr)
 	int connection_socket = *connection_socket_ptr;
 	
 	char buffer[BUFFER_SIZE];
-	char * no_impl = "HTTP/1.0 501 NOT IMPLEMENTED \r\n";
-	char * bad_request = "HTTP/1.0 400 BAD REQUEST \r\n";
+	const char * no_impl = "HTTP/1.0 501 NOT IMPLEMENTED \r\n";
+	const char * bad_request = "HTTP/1.0 400 BAD REQUEST \r\n";
 
 	
 	bzero(buffer, sizeof(buffer));
 	if (read(connection_socket, buffer, BUFFER_SIZE) < 0)
-		error("Reading from socket failed", connection_sock);
+		error("Reading from socket failed", connection_socket);
 	printf("%s", buffer);
 	
 	// parsing the msg...
