@@ -17,11 +17,9 @@ inside while loop:
 
 Other Quesitons:
 
-- how long should the queue be on the proxy server's listening socket
-- if something is invalid, do we send and HTTP response, or our own type of message? And what should that response look like?
-- How many "small errors" are we supposed to accept? And what types?
-- Is the Host header guarenteed to come after the first line? Optionally followed by other header?
-- are we only responsible for http requests?
-- What will it look like, when the port is specified?
-- How do you type CRLF \r\n
-- HTTP/1.0 do we 'fix this' or just type it in? 
+	If we can't connect to the sever should we just terminate the program, or try to reconnect?
+	When we get and error through communication with the server, do we need to send and error message to the client?
+	Can we have other things before "www" besides "http://"?
+	How do we determine whether this is a correctly formatted http request or not if there is no http?
+	Help us set up testing?
+	
