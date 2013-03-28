@@ -11,23 +11,21 @@ const int MAX_CONCURRENT = 10;
 //print error
 void error(const std::string& msg)
 {
-    perror(msg.c_str());
-    exit(0);
+	perror(msg.c_str());
+	exit(0);
 }
 
 void error(const std::string& msg, const int sock)
 {
 	close(sock);
-    perror(msg.c_str());
-    exit(0);
+	perror(msg.c_str());
+	exit(0);
 }
 
 void error(const std::string& msg, const int sock1, int sock2)
 {
 	close(sock1);
 	close(sock2);
-    perror(msg.c_str());
-    exit(0);
+	perror(msg.c_str());
+	exit(0);
 }
-
-

@@ -22,4 +22,6 @@ Other Quesitons:
 	Can we have other things before "www" besides "http://"?
 	How do we determine whether this is a correctly formatted http request or not if there is no http?
 	Help us set up testing?
+
+	If GET www.apple.com/ HTTP/1.0, bad request… Only GET http://www.apple.com/ HTTP/1.0 works… 
 	
