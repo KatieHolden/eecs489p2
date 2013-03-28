@@ -60,10 +60,11 @@ int main(int argc, char * argv[])
 	if (listen(listen_sock, MAX_CONCURRENT) < 0)
 		error("Listening failed");
 	
-	while(true){
+	int connection_sock;
+	while(true) {
 		cout << "### should be here 1..." << endl;
 		
-		int connection_sock = accept(listen_sock, NULL, NULL);
+		connection_sock = accept(listen_sock, NULL, NULL);
 		if (connection_sock < 0) {
 			error("Accepting failed");
 			continue;
@@ -82,7 +83,7 @@ int main(int argc, char * argv[])
 
 void work_dispatcher(int sock)
 {
-	//cout << "### into work_dispatcher" << endl;
+	cout << "### into work_dispatcher" << endl;
 	
 	// create a pthread
 	pthread_attr_t attr;
@@ -116,6 +117,9 @@ void* worker(void * ptr)
 	bzero(buffer, sizeof(buffer));
 	if (read(client_sock, buffer, BUFFER_SIZE) < 0) {
 		perror("Reading from socket failed");
+		
+		// TODO: do we need to send error msg back to client?
+		
 		return 0;
 	}
 	
@@ -135,6 +139,14 @@ void* worker(void * ptr)
 		}
 	}
 	
+	// check this is a HTTP request
+	if (version.substr(0, 4) != "HTTP") {
+		if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
+			perror("This is not a HTTP request");
+			return 0;
+		}
+	}
+	
 	// check whether relative or absolute
 	if (url[0] == '/') {
 		isRelative = true;
@@ -143,24 +155,24 @@ void* worker(void * ptr)
 	
 	// check other header format, and store all <header_name, header_value> pairs in map
 	map<string, string> header_map;
-	while(ss >> header){
+	while(ss >> header) {
 		
-		if(*(header.end() - 1) != ':'){
+		if(*(header.end() - 1) != ':') {
 			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
 				perror("Writing to socket failed");
 				return 0;
 			}
 		}
 		
-		if(ss >> value){
-			if(*(value.end() - 1) == ':'){ //TODO: is it an error if header value ends with a ":" ?
+		if(ss >> value) {
+			if(*(value.end() - 1) == ':') { //TODO: is it an error if header value ends with a ":" ? each line terminate with \r\n
 				if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
 					perror("Writing to socket failed");
 					return 0;
 				}
 			}
 		}
-		else{
+		else {
 			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
 				perror("Writing to socket failed");
 				return 0;
@@ -174,7 +186,7 @@ void* worker(void * ptr)
 	}
 	
 	// error if the url is relative but no host header is found
-	if(isRelative && header_map.find("Host:") == header_map.end()){
+	if(isRelative && header_map.find("Host:") == header_map.end()) {
 		if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
 			perror("Writing to socket failed");
 			return 0;
@@ -223,8 +235,19 @@ void* worker(void * ptr)
 	
 	// create the socket to connect to server
 	int server_sock = socket(AF_INET, SOCK_STREAM, 0);
+	/*
+	// if fail, try for two more times
+	int count = 0;
+	while (count < 2 && server_sock < 0) {
+		server_sock = socket(AF_INET, SOCK_STREAM, 0);
+		count++;
+	}
+	*/
 	if (server_sock < 0) {
 		perror("Creating server_sock failed");
+		
+		// TODO: do we need to send error msg back to client?
+		
 		return 0;
 	}
 	
@@ -232,6 +255,9 @@ void* worker(void * ptr)
 	struct hostent * server = gethostbyname(host.c_str());
 	if (!server) {
 		perror("No such host");
+		
+		// TODO: do we need to send error msg back to client?
+		
 		return 0;
 	}
 	
@@ -242,8 +268,20 @@ void* worker(void * ptr)
 	server_addr.sin_port = htons(portno);
 	
 	// create a connection with the server
+	/*
+	count = 0;
+	int isConnected = connect(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
+	while (cound < 2 && isConnected < 0) {
+		isConnected = connect(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
+		count++;
+	}
+	if (isConnected < 0) {
+	*/
 	if (connect(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
 		perror("Connection failed");
+		
+		// TODO: do we need to send error msg back to client?
+		
 		return 0;
 	}
 	
@@ -252,6 +290,9 @@ void* worker(void * ptr)
 	// send message to the server
 	if (write(server_sock, request.c_str(), strlen(request.c_str())) < 0) {
 		perror("Writing to socket failed");
+		
+		// TODO: do we need to send error msg back to client?
+		
 		close(server_sock);
 		return 0;
 	}
@@ -259,7 +300,10 @@ void* worker(void * ptr)
 	// receive response from server and store in buffer
 	char response_buffer[BUFFER_SIZE];
 	if (read(server_sock, response_buffer, BUFFER_SIZE) < 0) {
-		error("Reading from socket failed");
+		perror("Reading from socket failed");
+		
+		// TODO: do we need to send error msg back to client?
+		
 		close(server_sock);
 		return 0;
 	}
@@ -270,6 +314,9 @@ void* worker(void * ptr)
 	// send the response back to client
 	if (write(client_sock, response_buffer, strlen(response_buffer)) < 0) {
 		perror("Writing to socket failed");
+		
+		// TODO: do we need to send error msg back to client?
+		
 		return 0;
 	}
 }
