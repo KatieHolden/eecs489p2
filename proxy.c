@@ -10,15 +10,19 @@
 #include <string>
 #include <sstream>
 #include <map>
+
 #include <stdlib.h>
 #include <stdio.h>
-#include <sys/types.h> 
+
+#include <sys/types.h>
 #include <sys/socket.h>
+
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <unistd.h>
+
 #include <pthread.h>
 #include "utility.h"
 
@@ -29,45 +33,48 @@ using namespace std;
 
 int main(int argc, char * argv[]) 
 {
-	int listen_portno;
-	int listen_sock;
-	int conn_sock;
-	struct sockaddr_in proxy_addr;
-	//char buffer[BUFFER_SIZE];
-	
 	if (argc < 2) {
 		fprintf(stderr, "ERROR, no port provided\n");
 		exit(1);
 	}
 	
-	/* Get port number from command line */
-	listen_portno = atoi(argv[1]);
+	// get port number from command line
+	int listen_portno = atoi(argv[1]);
 	
-	/* Create a socket to listen on requests */
-	listen_sock = socket(AF_INET, SOCK_STREAM, 0);
+	// create a socket to listen on requests
+	int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (listen_sock < 0)
 		error("Creating socket failed");
 	
-	/* Build the proxy's internet address */
+	// build the proxy's internet address
+	struct sockaddr_in proxy_addr;
 	proxy_addr.sin_family = AF_INET;
 	proxy_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	proxy_addr.sin_port = htons(listen_portno);
 	
-	/* Bind */
+	// bind
 	if (bind(listen_sock, (struct sockaddr *) &proxy_addr, sizeof(proxy_addr)) < 0)
 		error("Binding failed");
 	
-	// TODO: 20?
-	/* Listen */
+	// listen
 	if (listen(listen_sock, MAX_CONCURRENT) < 0)
 		error("Listening failed");
 	
 	while(true){
+		cout << "### should be here 1..." << endl;
+		
 		int connection_sock = accept(listen_sock, NULL, NULL);
-		if (connection_sock < 0)
+		if (connection_sock < 0) {
 			error("Accepting failed");
+			continue;
+		}
+		// now the client is connected to the proxy
+		
+		cout << "### should be here 2..." << endl;
 		
 		work_dispatcher(connection_sock);
+		
+		cout << "### should be here 3..." << endl;
 	}
 	
 	return 0;
@@ -75,6 +82,8 @@ int main(int argc, char * argv[])
 
 void work_dispatcher(int sock)
 {
+	//cout << "### into work_dispatcher" << endl;
+	
 	// create a pthread
 	pthread_attr_t attr;
   pthread_attr_init(&attr);
@@ -84,39 +93,46 @@ void work_dispatcher(int sock)
   pthread_t worker_pthread;
 	if (pthread_create(&worker_pthread, &attr, worker, (void*) sock)) {
 		// close the connection socket
-		//close(sock);
-		error("Cannot create the thread.", sock);
+		close(sock);
+		perror("Cannot create the thread.");
 	}
 	
-	//close(sock);
+	// return from worfer function, then close the connection to client
+	close(sock);
 }
 
 void* worker(void * ptr)
 {
-	int *connection_socket_ptr = (int*) ptr;
-	int connection_socket = *connection_socket_ptr;
+	//cout << "### into worker" << endl;
+	
+	int *client_sock_ptr = (int*) ptr;
+	int client_sock = *client_sock_ptr;
 	
 	char buffer[BUFFER_SIZE];
 	const char * no_impl = "HTTP/1.0 501 NOT IMPLEMENTED \r\n";
 	const char * bad_request = "HTTP/1.0 400 BAD REQUEST \r\n";
 
-	
+	// get request from the client
 	bzero(buffer, sizeof(buffer));
-	if (read(connection_socket, buffer, BUFFER_SIZE) < 0)
-		error("Reading from socket failed", connection_socket);
-	printf("%s", buffer);
+	if (read(client_sock, buffer, BUFFER_SIZE) < 0) {
+		perror("Reading from socket failed");
+		return 0;
+	}
 	
-	// parsing the msg...
+	// parsing the request message
 	stringstream ss(buffer);
-	string method, url, version, host, path, header, value, port;
+	string method, url, version, host, path, header, value;
 	int portno = 80;
 	bool isRelative = false;
 	
 	ss >> method >> url >> version;
-	// check the method
+	
+	// check the method and make sure it is GET
 	if (method != "GET") {
-		if (write(connection_socket, no_impl, strlen(no_impl)) < 0)
-				error("Writing to socket failed", connection_socket);
+		if (write(client_sock, no_impl, strlen(no_impl)) < 0) {
+			perror("Writing to socket failed");
+			return 0;
+		}
 	}
 	
 	// check whether relative or absolute
@@ -125,64 +141,78 @@ void* worker(void * ptr)
 		path = url;
 	}
 	
-	// check other header format
+	// check other header format, and store all <header_name, header_value> pairs in map
 	map<string, string> header_map;
 	while(ss >> header){
 		
 		if(*(header.end() - 1) != ':'){
-			if (write(connection_socket, bad_request, strlen(bad_request)) < 0)
-				error("Writing to socket failed", connection_socket);
+			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
+				perror("Writing to socket failed");
+				return 0;
+			}
 		}
 		
 		if(ss >> value){
-			if(*(value.end() - 1) == ':'){
-				if (write(connection_socket, bad_request, strlen(bad_request)) < 0)
-					error("Writing to socket failed", connection_socket);
+			if(*(value.end() - 1) == ':'){ //TODO: is it an error if header value ends with a ":" ?
+				if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
+					perror("Writing to socket failed");
+					return 0;
+				}
 			}
 		}
 		else{
-			if (write(connection_socket, bad_request, strlen(bad_request)) < 0)
-				error("Writing to socket failed", connection_socket);
+			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
+				perror("Writing to socket failed");
+				return 0;
+			}
 		}
 
-		if(header == "Host:"){
+		if(header == "Host:")
 			host = value;
-		}
 		
 		header_map[header] = value;
 	}
 	
+	// error if the url is relative but no host header is found
 	if(isRelative && header_map.find("Host:") == header_map.end()){
-		if (write(connection_socket, bad_request, strlen(bad_request)) < 0)
-			error("Writing to socket failed", connection_socket);
+		if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
+			perror("Writing to socket failed");
+			return 0;
+		}
 	}
+	
 	// parse the url, only for absolute 
 	if (!isRelative) {
 		
+		// get the starting index of host
 		int pos_head = url.find("www");
 		if (pos_head == string::npos) {
-			if (write(connection_socket, bad_request, strlen(bad_request)) < 0)
-				error("Writing to socket failed", connection_socket);
+			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
+				perror("Writing to socket failed");
+				return 0;
+			}
 		}
 		
+		// get the last index of host which always ends with '/'
 		int pos_tail = url.find_first_of("/", pos_head);
 		if (pos_tail == string::npos) {
-			if (write(connection_socket, bad_request, strlen(bad_request)) < 0)
-				error("Writing to socket failed", connection_socket);
+			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
+				perror("Writing to socket failed");
+				return 0;
+			}
 		}
-
+		
+		// get the portno if there is one. otherwise portno is set to 80
 		int pos_port = url.find_first_of(":", pos_head);
-		if(pos_port < pos_tail){
+		if(pos_port < pos_tail) {
 			portno = atoi(url.substr(pos_port + 1, pos_tail - pos_port - 1).c_str());	
 		}
-
-			
+		
 		host = url.substr(pos_head, pos_tail - pos_head + 1);
 		path = url.substr(pos_tail);
-		
 	}
 	
-	// form the request
+	// form the request to server
 	string request = "GET " + path + " HTTP/1.0\r\n" + "Host: " + host + "\r\n";
 	for(map<string, string>::iterator it = header_map.begin(); it != header_map.end(); ++it) {
 		string header_line = it->first + " " + it->second + "\r\n";
@@ -190,44 +220,56 @@ void* worker(void * ptr)
 	}
 	
 	// send the request to server
-	int sock;
-	struct hostent * server;
+	
+	// create the socket to connect to server
+	int server_sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (server_sock < 0) {
+		perror("Creating server_sock failed");
+		return 0;
+	}
+	
+	// get the server's DNS entry
+	struct hostent * server = gethostbyname(host.c_str());
+	if (!server) {
+		perror("No such host");
+		return 0;
+	}
+	
+	// build the server's internet address
 	struct sockaddr_in server_addr;
-	
-	// create the socket
-	sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (sock < 0)
-		error("Creating socket failed", connection_socket);
-	
-	// Get the server's DNS entry
-	server = gethostbyname(host.c_str());
-	if (!server)
-		error("No such host", connection_socket);
-	
-	// Build the server's internet address
 	server_addr.sin_family = AF_INET;
 	bcopy((char *) server->h_addr, (char *) &server_addr.sin_addr.s_addr, server->h_length);
 	server_addr.sin_port = htons(portno);
 	
-	// Create a connection with the server
-	if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-		error("Connection failed", connection_socket);
+	// create a connection with the server
+	if (connect(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+		perror("Connection failed");
+		return 0;
+	}
 	
-	// Send message to the server
-	if (write(sock, request.c_str(), strlen(request.c_str())) < 0)
-		error("Writing to socket failed", sock, connection_socket);
+	// now connection to server is set up
 	
-	// Receive response from server
+	// send message to the server
+	if (write(server_sock, request.c_str(), strlen(request.c_str())) < 0) {
+		perror("Writing to socket failed");
+		close(server_sock);
+		return 0;
+	}
+	
+	// receive response from server and store in buffer
 	char response_buffer[BUFFER_SIZE];
-	if (read(sock, response_buffer, BUFFER_SIZE) < 0)
-		error("Reading from socket failed", sock, connection_socket);
+	if (read(server_sock, response_buffer, BUFFER_SIZE) < 0) {
+		error("Reading from socket failed");
+		close(server_sock);
+		return 0;
+	}
 
-	//close connection to remote server	
-	close(sock);
+	// close connection to remote server	
+	close(server_sock);
 
 	// send the response back to client
-	if (write(connection_socket, response_buffer, strlen(response_buffer)) < 0)
-		error("Writing to socket failed", connection_socket);
-
-	close(connection_socket);
+	if (write(client_sock, response_buffer, strlen(response_buffer)) < 0) {
+		perror("Writing to socket failed");
+		return 0;
+	}
 }
