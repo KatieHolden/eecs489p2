@@ -64,8 +64,6 @@ int main(int argc, char * argv[])
 	
 	int connection_sock;
 	while(true) {
-		//cout << "### should be here 1..." << endl;
-		
 		connection_sock = accept(listen_sock, NULL, NULL);
 		if (connection_sock < 0) {
 			error("Accepting failed");
@@ -73,10 +71,6 @@ int main(int argc, char * argv[])
 		}		
 		
 		// now the client is connected to the proxy
-		
-		cout<<"### sock is " << connection_sock << endl;
-		
-		//cout << "### should be here 2..." << endl;
 		
 		work_dispatcher(connection_sock);
 	}
@@ -86,8 +80,6 @@ int main(int argc, char * argv[])
 
 void work_dispatcher(int sock)
 {
-	//cout << "### into work_dispatcher" << endl;
-	
 	// create a pthread
 	pthread_attr_t attr;
   pthread_attr_init(&attr);
@@ -123,7 +115,7 @@ void * worker(void * ptr)
 		return 0;
 	}
 	
-	cout << "### " << buffer << endl;
+	//cout << "### " << buffer << endl;
 	
 	// parsing the request message
 	stringstream ss(buffer);
@@ -142,7 +134,7 @@ void * worker(void * ptr)
 		return 0;
 	}
 	
-	cout << "### method is GET\n";
+	//cout << "### method is GET\n";
 	
 	// check this is a HTTP request
 	if (version.substr(0, 4) != "HTTP") {
@@ -153,7 +145,7 @@ void * worker(void * ptr)
 		return 0;
 	}
 	
-	cout << "### is a HTTP request\n";
+	//cout << "### is a HTTP request\n";
 	
 	// check whether relative or absolute
 	if (url[0] == '/') {
@@ -164,7 +156,6 @@ void * worker(void * ptr)
 	// check other header format, and store all <header_name, header_value> pairs in map
 	map<string, string> header_map;
 	while(ss >> header) {
-		
 		if(*(header.end() - 1) != ':') {
 			perror("Header name format is wrong");
 			send_bad_request(client_sock);
@@ -173,7 +164,7 @@ void * worker(void * ptr)
 			return 0;
 		}
 		
-		if(ss >> value) {
+		if(getline(ss, value)) {
 			if(*(value.end() - 1) == ':') { //TODO: each line terminate with \r\n
 				perror("Header value format is wrong");
 				send_bad_request(client_sock);
@@ -244,8 +235,7 @@ void * worker(void * ptr)
 		string header_line = it->first + " " + it->second + "\r\n";
 		request += header_line;
 	}
-	
-	cout << "### request to server is\n" << request << "\n###, and portno is " << portno << endl;
+	request += "\r\n";
 	
 	// send the request to server
 	
@@ -305,7 +295,7 @@ void * worker(void * ptr)
 	}
 	
 	// now connection to server is set up
-	cout << "### connection to server is set up\n";
+	//cout << "### connection to server is set up\n";
 	
 	
 	// send message to the server
@@ -319,17 +309,20 @@ void * worker(void * ptr)
 		return 0;
 	}
 	
-	cout << "### wrote to sever\n";
+	//cout << "### wrote to sever\n";
 	
 	// receive response from server byte by byte, and send to client immediately
 	char byte;
 	int byte_read = -1;
+	char last_four_bytes[4] = {' ', ' ', ' ', ' '};
+	int line_terminator_cnt = 0;
+	
 	
 	while (true) {
 		
 		// read one byte from the server
 		byte_read = read(server_sock, (void*) &byte, 1);
-		if (byte_read <= 0) {
+		if (byte_read < 0) {
 			perror("Reading from server failed");
 			// TODO: do we need to send error msg back to client?
 			send_bad_request(client_sock);
@@ -338,8 +331,14 @@ void * worker(void * ptr)
 			close(server_sock);
 			return 0;
 		}
-		
-		cout << byte;
+		else if (byte_read == 0) {
+			perror("Server close the connection");
+			send_bad_request(client_sock);
+			close(client_sock);
+			delete client_sock_ptr;
+			close(server_sock);
+			return 0;
+		}
 		
 		// send one byte to client
 		if (write(client_sock, (void*) &byte, 1) < 0) {
@@ -352,10 +351,15 @@ void * worker(void * ptr)
 			return 0;
 		}
 		
-		// TODO:
-		// check if the end of message
-		if (byte == '\r') {
-			
+		// check for "\r\n\r\n"
+		for (int i = 0; i < 3; ++i)
+			last_four_bytes[i] = last_four_bytes[i+1];
+		last_four_bytes[3] = byte;
+		if (last_four_bytes[0] == '\r' && last_four_bytes[1] == '\n' && last_four_bytes[2] == '\r' && last_four_bytes[3] == '\n') {
+			if (line_terminator_cnt == 0)
+				line_terminator_cnt++;
+			else
+				break;
 		}
 	}
 	 
