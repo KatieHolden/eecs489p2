@@ -27,7 +27,9 @@
 #include "utility.h"
 
 void work_dispatcher(int sock);
-void* worker(void * ptr);
+void * worker(void * ptr);
+void send_bad_request(int sock);
+void send_no_impl(int sock);
 
 using namespace std;
 
@@ -103,31 +105,25 @@ void work_dispatcher(int sock)
 	}
 }
 
-void* worker(void * ptr)
+void * worker(void * ptr)
 {	
 	int *client_sock_ptr = (int*) ptr;
 	int client_sock = *client_sock_ptr;
 	
-	char buffer[BUFFER_SIZE];
-	const char * no_impl = "HTTP/1.0 501 NOT IMPLEMENTED \r\n";
-	const char * bad_request = "HTTP/1.0 400 BAD REQUEST \r\n";
-	
-	//cout << "### into worker, with client_sock " << client_sock << endl;
+	//const char * no_impl = "HTTP/1.0 501 NOT IMPLEMENTED \r\n";
+	//const char * bad_request = "HTTP/1.0 400 BAD REQUEST \r\n";
 	
 	// get request from the client
+	char buffer[BUFFER_SIZE];
 	bzero(buffer, sizeof(buffer));
-	
-	cout << "### client_sock: " << client_sock << endl;
 	if (read(client_sock, buffer, BUFFER_SIZE) < 0) {
 		perror("Reading from socket failed");
-		printf( "%s\n", strerror( errno ) );
 		// TODO: do we need to send error msg back to client?
 		
 		return 0;
 	}
 	
 	cout << "### " << buffer << endl;
-	
 	
 	// parsing the request message
 	stringstream ss(buffer);
@@ -139,24 +135,22 @@ void* worker(void * ptr)
 	
 	// check the method and make sure it is GET
 	if (method != "GET") {
-		if (write(client_sock, no_impl, strlen(no_impl)) < 0) {
-			perror("Writing to socket failed");
-			close(client_sock);
-			delete client_sock_ptr;
-			return 0;
-		}
+		perror("Method is not GET");
+		send_no_impl(client_sock);
+		close(client_sock);
+		delete client_sock_ptr;
+		return 0;
 	}
 	
 	cout << "### method is GET\n";
 	
 	// check this is a HTTP request
 	if (version.substr(0, 4) != "HTTP") {
-		if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
-			perror("This is not a HTTP request");
-			close(client_sock);
-			delete client_sock_ptr;
-			return 0;
-		}
+		perror("This is not a HTTP request");
+		send_bad_request(client_sock);
+		close(client_sock);
+		delete client_sock_ptr;
+		return 0;
 	}
 	
 	cout << "### is a HTTP request\n";
@@ -172,31 +166,28 @@ void* worker(void * ptr)
 	while(ss >> header) {
 		
 		if(*(header.end() - 1) != ':') {
-			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
-				perror("Writing to socket failed");
-				close(client_sock);
-				delete client_sock_ptr;
-				return 0;
-			}
+			perror("Header name format is wrong");
+			send_bad_request(client_sock);
+			close(client_sock);
+			delete client_sock_ptr;
+			return 0;
 		}
 		
 		if(ss >> value) {
-			if(*(value.end() - 1) == ':') { //TODO: is it an error if header value ends with a ":" ? each line terminate with \r\n
-				if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
-					perror("Writing to socket failed");
-					close(client_sock);
-					delete client_sock_ptr;
-					return 0;
-				}
-			}
-		}
-		else {
-			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
-				perror("Writing to socket failed");
+			if(*(value.end() - 1) == ':') { //TODO: each line terminate with \r\n
+				perror("Header value format is wrong");
+				send_bad_request(client_sock);
 				close(client_sock);
 				delete client_sock_ptr;
 				return 0;
 			}
+		}
+		else {
+			perror("Header name and value pair does not match");
+			send_bad_request(client_sock);
+			close(client_sock);
+			delete client_sock_ptr;
+			return 0;
 		}
 
 		if(header == "Host:")
@@ -207,39 +198,34 @@ void* worker(void * ptr)
 	
 	// error if the url is relative but no host header is found
 	if(isRelative && header_map.find("Host:") == header_map.end()) {
-		if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
-			perror("Writing to socket failed");
-			close(client_sock);
-			delete client_sock_ptr;
-			return 0;
-		}
+		perror("No host header is found for the relative url");
+		send_bad_request(client_sock);
+		close(client_sock);
+		delete client_sock_ptr;
+		return 0;
 	}
 	
 	// parse the url, only for absolute 
 	if (!isRelative) {
 		
-		cout << "###\n";
-		
 		// get the starting index of host
 		int pos_head = url.find("www");
 		if (pos_head == string::npos) {
-			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
-				perror("Writing to socket failed");
-				close(client_sock);
-				delete client_sock_ptr;
-				return 0;
-			}
+			perror("No www is found in url");
+			send_bad_request(client_sock);
+			close(client_sock);
+			delete client_sock_ptr;
+			return 0;
 		}
 		
 		// get the last index of host which always ends with '/'
 		int pos_tail = url.find_first_of("/", pos_head);
 		if (pos_tail == string::npos) {
-			if (write(client_sock, bad_request, strlen(bad_request)) < 0) {
-				perror("Writing to socket failed");
-				close(client_sock);
-				delete client_sock_ptr;
-				return 0;
-			}
+			perror("No / is found in url");
+			send_bad_request(client_sock);
+			close(client_sock);
+			delete client_sock_ptr;
+			return 0;
 		}
 		
 		// get the portno if there is one. otherwise portno is set to 80
@@ -259,7 +245,7 @@ void* worker(void * ptr)
 		request += header_line;
 	}
 	
-	cout << "### request to server is " << request << ", and portno is " << portno << endl;
+	cout << "### request to server is\n" << request << "\n###, and portno is " << portno << endl;
 	
 	// send the request to server
 	
@@ -275,11 +261,10 @@ void* worker(void * ptr)
 	*/
 	if (server_sock < 0) {
 		perror("Creating server_sock failed");
+		// TODO: do we need to send error msg back to client?
+		send_bad_request(client_sock);
 		close(client_sock);
 		delete client_sock_ptr;
-		
-		// TODO: do we need to send error msg back to client?
-		
 		return 0;
 	}
 	
@@ -287,11 +272,10 @@ void* worker(void * ptr)
 	struct hostent * server = gethostbyname(host.c_str());
 	if (!server) {
 		perror("No such host");
+		// TODO: do we need to send error msg back to client?
+		send_bad_request(client_sock);
 		close(client_sock);
 		delete client_sock_ptr;
-		
-		// TODO: do we need to send error msg back to client?
-		
 		return 0;
 	}
 	
@@ -313,10 +297,10 @@ void* worker(void * ptr)
 	*/
 	if (connect(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
 		perror("Connection failed");
+		// TODO: do we need to send error msg back to client?
+		send_bad_request(client_sock);
 		close(client_sock);
 		delete client_sock_ptr;
-		// TODO: do we need to send error msg back to client?
-		
 		return 0;
 	}
 	
@@ -327,43 +311,76 @@ void* worker(void * ptr)
 	// send message to the server
 	if (write(server_sock, request.c_str(), strlen(request.c_str())) < 0) {
 		perror("Writing to socket failed");
+		// TODO: do we need to send error msg back to client?
+		send_bad_request(client_sock);
 		close(client_sock);
 		delete client_sock_ptr;
-		// TODO: do we need to send error msg back to client?
-		
 		close(server_sock);
 		return 0;
 	}
 	
 	cout << "### wrote to sever\n";
 	
-	// receive response from server and store in buffer
-	char response_buffer[BUFFER_SIZE];
-	if (read(server_sock, response_buffer, BUFFER_SIZE) < 0) {
-		perror("Reading from socket failed");
-		close(client_sock);
-		delete client_sock_ptr;
-		// TODO: do we need to send error msg back to client?
-		
-		close(server_sock);
-		return 0;
-	}
+	// receive response from server byte by byte, and send to client immediately
+	char byte;
+	int byte_read = -1;
 	
-	cout << "### read from server\n";
-
+	while (true) {
+		
+		// read one byte from the server
+		byte_read = read(server_sock, (void*) &byte, 1);
+		if (byte_read <= 0) {
+			perror("Reading from server failed");
+			// TODO: do we need to send error msg back to client?
+			send_bad_request(client_sock);
+			close(client_sock);
+			delete client_sock_ptr;
+			close(server_sock);
+			return 0;
+		}
+		
+		cout << byte;
+		
+		// send one byte to client
+		if (write(client_sock, (void*) &byte, 1) < 0) {
+			perror("Writing to socket failed");
+			// TODO: do we need to send error msg back to client?
+			send_bad_request(client_sock);
+			close(client_sock);
+			delete client_sock_ptr;
+			close(server_sock);
+			return 0;
+		}
+		
+		// TODO:
+		// check if the end of message
+		if (byte == '\r') {
+			
+		}
+	}
+	 
 	// close connection to remote server	
 	close(server_sock);
-
-	// send the response back to client
-	if (write(client_sock, response_buffer, strlen(response_buffer)) < 0) {
-		perror("Writing to socket failed");
-		close(client_sock);
-		delete client_sock_ptr;
-		// TODO: do we need to send error msg back to client?
-		
-		return 0;
-	}
 	
+	// close connection to client
 	close(client_sock);
 	delete client_sock_ptr;
+}
+
+void send_bad_request(int sock)
+{
+	const char * bad_request = "HTTP/1.0 400 BAD REQUEST \r\n";
+	int tmp = -1;
+	while (tmp < 0) {
+		tmp = write(sock, bad_request, strlen(bad_request));
+	}
+}
+
+void send_no_impl(int sock)
+{
+	const char * no_impl = "HTTP/1.0 501 NOT IMPLEMENTED \r\n";
+	int tmp = -1;
+	while (tmp < 0) {
+		tmp = write(sock, no_impl, strlen(no_impl));
+	}
 }
