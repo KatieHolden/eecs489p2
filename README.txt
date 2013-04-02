@@ -1,27 +1,16 @@
-(check this logic in office hours)
-inside while loop:
+Katie Holden - kaholden
+Amanda Le - xinning
+EECS 489 Project 2 
 
-	- create thread
-	- check whether request is formatted correctly
-		maybe fix small things
-		if it's too incorrect, return error
-	- check that request is GET method
-		if not, return Error message
-	- if relative path, check that header is included
-	- parse request
-	- create sending socket
-	- send request to server
-	- wait for response
-	- send response to client. 
+Description:
+This is code to run a multithread web-proxy. It will listen for incoming requests from a client, parse the request and send it to the appropriate remote server. If there are errors while parsing the client request, the appropriate HTTP response message will be sent to the client. For small errors like incorrect HTTP version number or incorrect line terminators, the proxy will still accept the client request, and fix the errors before sending the request on to the remote server. The proxy will wait for a response from the remote server and send the response, as is, back to the client.
 
+Design Decisions:
+- We decided to make one thread per HTTP request. We thought that this would allow the proxy to service multiple requests without loosing performance, and would scale well when working with a browser.
 
-Other Quesitons:
+- When we read the request from the client, we store it in a large buffer. We chose to do this, because we needed to parse the client request, rather than send it as-is. We stop reading from the client when we have read the \r\n\r\n sequence.
 
-	If we can't connect to the sever should we just terminate the program, or try to reconnect?
-	When we get and error through communication with the server, do we need to send and error message to the client?
-	Can we have other things before "www" besides "http://"?
-	How do we determine whether this is a correctly formatted http request or not if there is no http?
-	Help us set up testing?
+- When we read the HTTP response from the remote server, we chose to read the message byte-by-byte. We did this because we just have to send the message as-is back to the client. Also, the response message could be very large, since it contains the HTML for the page. It is unlikely that this would fit in a large buffer. So, in a loop, we read a byte and immediately send it to the client.
 
-	If GET www.apple.com/ HTTP/1.0, bad request… Only GET http://www.apple.com/ HTTP/1.0 works… 
-	
+- Lastly, when parsing the client request, if we come across a "Connection: " header, we do not send this HTTP header/value pair to the remote server. The value of the attribute is most likely "keep-alive". Keeping TCP connections alive slows down the response time significantly.
+ 

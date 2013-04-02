@@ -1,7 +1,7 @@
 # Makefile for PA2
 
 CC = g++
-CFLAGS = -g -Wall -Werror
+CFLAGS = -g -Wall -Werror -pthread
 
 all: proxy
 
